@@ -89,12 +89,19 @@ function M.activate_env(env)
   if env == nil then
     return false
   end
-  
+
+  -- Validate the environment path exists
+  if env.path and env.path ~= "" and vim.fn.isdirectory(env.path) == 0 then
+    vim.notify("Environment path no longer exists: " .. env.path, vim.log.levels.ERROR)
+    vim.notify("The directory may have been moved or renamed", vim.log.levels.WARN)
+    return false
+  end
+
   -- Save the previous PATH to restore later
   M.previous_path = vim.env.PATH
   M.current_env = env
   M.current_env_type = env.type
-  
+
   -- Perform activation
   local success = environments.activate(env)
   if not success then

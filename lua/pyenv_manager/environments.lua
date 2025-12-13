@@ -186,7 +186,17 @@ end
 -- Get list of installed packages in a venv
 function M.get_packages(env)
   if not env or not env.path or env.path == "" then
-    return nil
+    return {"Invalid environment"}
+  end
+
+  -- Check if the venv path still exists
+  if vim.fn.isdirectory(env.path) == 0 then
+    return {"Environment path no longer exists", "Path may have been moved or renamed"}
+  end
+
+  -- Verify it's still a valid venv
+  if not M.is_venv(env.path) then
+    return {"No longer a valid virtual environment", "Path may have been modified"}
   end
 
   -- Get pip path
@@ -203,9 +213,7 @@ function M.get_packages(env)
   local result = vim.fn.system(cmd)
 
   if vim.v.shell_error ~= 0 then
-    -- Clean error message and ensure no newlines
-    local error_msg = result:gsub("[\r\n]+", " ")
-    return {"Error retrieving packages"}
+    return {"Error retrieving packages", "The environment may be corrupted"}
   end
 
   -- Split result into lines and clean each line
