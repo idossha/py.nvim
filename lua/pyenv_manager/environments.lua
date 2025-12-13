@@ -6,32 +6,41 @@ local config = require("pyenv_manager.config")
 -- Find all virtual environments
 function M.find_venvs()
   local venvs = {}
-  
+  local seen_paths = {}  -- Track paths we've already added to avoid duplicates
+
+  -- Helper function to add venv if not duplicate
+  local function add_venv(venv_entry)
+    if not seen_paths[venv_entry.path] then
+      seen_paths[venv_entry.path] = true
+      table.insert(venvs, venv_entry)
+    end
+  end
+
   -- Search in predefined paths
   for _, path in ipairs(config.options.venv_paths) do
     if vim.fn.isdirectory(path) == 1 then
       -- Check if the path itself is a venv
       if M.is_venv(path) then
-        table.insert(venvs, { path = path, name = vim.fn.fnamemodify(path, ":t"), type = "venv" })
+        add_venv({ path = path, name = vim.fn.fnamemodify(path, ":t"), type = "venv" })
       end
-      
+
       -- Check for venvs in subdirectories
       local entries = vim.fn.glob(path .. "/*", false, true)
       for _, entry in ipairs(entries) do
         if vim.fn.isdirectory(entry) == 1 then
           -- Check if entry is a venv
           if M.is_venv(entry) then
-            table.insert(venvs, { path = entry, name = vim.fn.fnamemodify(entry, ":t"), type = "venv" })
+            add_venv({ path = entry, name = vim.fn.fnamemodify(entry, ":t"), type = "venv" })
           else
             -- Check for venv names in subdirectories
             for _, venv_name in ipairs(config.options.venv_names) do
               local venv_path = entry .. "/" .. venv_name
               if vim.fn.isdirectory(venv_path) == 1 and M.is_venv(venv_path) then
                 local proj_name = vim.fn.fnamemodify(entry, ":t")
-                table.insert(venvs, { 
-                  path = venv_path, 
-                  name = proj_name .. " (" .. venv_name .. ")", 
-                  type = "venv" 
+                add_venv({
+                  path = venv_path,
+                  name = proj_name .. " (" .. venv_name .. ")",
+                  type = "venv"
                 })
               end
             end
@@ -40,7 +49,7 @@ function M.find_venvs()
       end
     end
   end
-  
+
   -- Check parent directories for venvs
   local current_dir = vim.fn.getcwd()
   local parent_dir = current_dir
@@ -50,7 +59,7 @@ function M.find_venvs()
       if vim.fn.isdirectory(venv_path) == 1 and M.is_venv(venv_path) then
         -- Use parent directory name + venv name for clarity
         local parent_name = vim.fn.fnamemodify(parent_dir, ":t")
-        table.insert(venvs, {
+        add_venv({
           path = venv_path,
           name = parent_name .. "/" .. venv_name,
           type = "venv"
@@ -62,7 +71,7 @@ function M.find_venvs()
       break
     end
   end
-  
+
   return venvs
 end
 
@@ -77,24 +86,33 @@ function M.find_conda_envs()
   if not config.options.show_conda then
     return {}
   end
-  
+
   local conda_envs = {}
-  
+  local seen_paths = {}  -- Track paths we've already added to avoid duplicates
+
+  -- Helper function to add conda env if not duplicate
+  local function add_conda_env(conda_entry)
+    if not seen_paths[conda_entry.path] then
+      seen_paths[conda_entry.path] = true
+      table.insert(conda_envs, conda_entry)
+    end
+  end
+
   for _, path in ipairs(config.options.conda_paths) do
     if vim.fn.isdirectory(path) == 1 then
       local entries = vim.fn.glob(path .. "/*", false, true)
       for _, entry in ipairs(entries) do
         if vim.fn.isdirectory(entry) == 1 and M.is_conda_env(entry) then
-          table.insert(conda_envs, { 
-            path = entry, 
+          add_conda_env({
+            path = entry,
             name = "conda: " .. vim.fn.fnamemodify(entry, ":t"),
-            type = "conda" 
+            type = "conda"
           })
         end
       end
     end
   end
-  
+
   return conda_envs
 end
 
