@@ -303,11 +303,12 @@ function M.create_venv(name, path)
 
   vim.notify("Successfully created virtual environment: " .. name, vim.log.levels.INFO)
 
-  -- Upgrade pip
+  -- Upgrade pip using 'python -m pip' for consistency
   vim.notify("Upgrading pip...", vim.log.levels.INFO)
   local bin_dir = vim.fn.has("win32") == 1 and "Scripts" or "bin"
-  local pip_path = full_path .. "/" .. bin_dir .. "/pip"
-  local upgrade_cmd = pip_path .. " install --upgrade pip"
+  local python_exe = vim.fn.has("win32") == 1 and "python.exe" or "python"
+  local python_path = full_path .. "/" .. bin_dir .. "/" .. python_exe
+  local upgrade_cmd = python_path .. " -m pip install --upgrade pip"
   local upgrade_result = vim.fn.system(upgrade_cmd)
 
   if vim.v.shell_error ~= 0 then
@@ -316,9 +317,14 @@ function M.create_venv(name, path)
     vim.notify("pip upgraded successfully", vim.log.levels.INFO)
   end
 
-  -- Return the environment object
+  -- Return the environment object with identifier-based structure
+  local project_name = vim.fn.fnamemodify(vim.fn.fnamemodify(full_path, ":h"), ":t")
   return {
-    path = full_path,
+    venv_name = name,
+    project_name = project_name,
+    discovery_type = "created",
+    identifier = project_name .. "/" .. name,
+    cached_path = full_path,
     name = name,
     type = "venv"
   }
@@ -362,12 +368,25 @@ function M.get_packages(env)
     }
   end
 
-  -- Get pip path
+  -- Get python path instead of pip path
+  -- Use 'python -m pip' to avoid issues with broken shebangs after directory renames
   local bin_dir = vim.fn.has("win32") == 1 and "Scripts" or "bin"
-  local pip_path = env_path .. "/" .. bin_dir .. "/pip"
+  local python_exe = vim.fn.has("win32") == 1 and "python.exe" or "python"
+  local python_path = env_path .. "/" .. bin_dir .. "/" .. python_exe
 
-  -- Run pip list
-  local cmd = pip_path .. " list --format=columns 2>&1"
+  -- Verify python exists
+  if vim.fn.filereadable(python_path) == 0 and vim.fn.executable(python_path) == 0 then
+    return {
+      "ERROR: Python executable not found",
+      "",
+      "Expected at: " .. python_path,
+      "",
+      "The virtual environment may be corrupted."
+    }
+  end
+
+  -- Run pip list using 'python -m pip' to avoid shebang issues
+  local cmd = python_path .. " -m pip list --format=columns 2>&1"
   local result = vim.fn.system(cmd)
 
   if vim.v.shell_error ~= 0 then
@@ -404,23 +423,34 @@ function M.detect_active()
   -- Check for venv
   local venv = vim.env.VIRTUAL_ENV
   if venv and venv ~= "" then
+    local venv_name = vim.fn.fnamemodify(venv, ":t")
+    local project_name = vim.fn.fnamemodify(vim.fn.fnamemodify(venv, ":h"), ":t")
     return {
-      path = venv,
-      name = vim.fn.fnamemodify(venv, ":t"),
+      venv_name = venv_name,
+      project_name = project_name,
+      discovery_type = "active",
+      identifier = project_name .. "/" .. venv_name,
+      cached_path = venv,
+      name = venv_name,
       type = "venv"
     }
   end
-  
+
   -- Check for conda
   local conda = vim.env.CONDA_PREFIX
   if conda and conda ~= "" then
+    local env_name = vim.fn.fnamemodify(conda, ":t")
     return {
-      path = conda,
-      name = "conda: " .. vim.fn.fnamemodify(conda, ":t"),
+      venv_name = env_name,
+      project_name = env_name,
+      discovery_type = "active",
+      identifier = "conda/" .. env_name,
+      cached_path = conda,
+      name = "conda: " .. env_name,
       type = "conda"
     }
   end
-  
+
   return nil
 end
 
