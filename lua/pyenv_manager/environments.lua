@@ -203,13 +203,24 @@ function M.get_packages(env)
   local result = vim.fn.system(cmd)
 
   if vim.v.shell_error ~= 0 then
-    return {"Error retrieving packages: " .. result}
+    -- Clean error message and ensure no newlines
+    local error_msg = result:gsub("[\r\n]+", " ")
+    return {"Error retrieving packages"}
   end
 
-  -- Split result into lines
+  -- Split result into lines and clean each line
   local lines = {}
   for line in result:gmatch("[^\r\n]+") do
-    table.insert(lines, line)
+    -- Remove any remaining newline characters and trim whitespace
+    local cleaned_line = line:gsub("[\r\n]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if cleaned_line ~= "" then
+      table.insert(lines, cleaned_line)
+    end
+  end
+
+  -- If no lines, return a message
+  if #lines == 0 then
+    return {"No packages installed"}
   end
 
   return lines

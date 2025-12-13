@@ -61,8 +61,16 @@ function M.show_picker(callback)
         return
       end
 
+      -- Ensure all lines are clean (no embedded newlines)
+      local clean_packages = {}
+      for _, line in ipairs(packages) do
+        -- Remove any newline characters that might have slipped through
+        local clean_line = tostring(line):gsub("[\r\n]", "")
+        table.insert(clean_packages, clean_line)
+      end
+
       -- Display packages in preview buffer
-      vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, packages)
+      vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, clean_packages)
 
       -- Set filetype for syntax highlighting
       vim.api.nvim_set_option_value("filetype", "text", { buf = self.state.bufnr })
