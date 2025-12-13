@@ -107,6 +107,52 @@ function M.is_conda_available()
   return vim.fn.executable("conda") == 1
 end
 
+-- Create a new virtual environment
+function M.create_venv(name, path)
+  -- Default to current working directory if path not provided
+  local venv_path = path or vim.fn.getcwd()
+  local full_path = venv_path .. "/" .. name
+
+  -- Check if directory already exists
+  if vim.fn.isdirectory(full_path) == 1 then
+    vim.notify("Directory already exists: " .. full_path, vim.log.levels.ERROR)
+    return nil
+  end
+
+  -- Find Python executable
+  local python_cmd = vim.fn.exepath("python3") or vim.fn.exepath("python")
+  if not python_cmd or python_cmd == "" then
+    vim.notify("Python executable not found", vim.log.levels.ERROR)
+    return nil
+  end
+
+  -- Create the venv
+  vim.notify("Creating virtual environment: " .. name, vim.log.levels.INFO)
+  local cmd = python_cmd .. " -m venv " .. vim.fn.shellescape(full_path)
+  local result = vim.fn.system(cmd)
+
+  -- Check if creation was successful
+  if vim.v.shell_error ~= 0 then
+    vim.notify("Failed to create virtual environment:\n" .. result, vim.log.levels.ERROR)
+    return nil
+  end
+
+  -- Verify the venv was created correctly
+  if not M.is_venv(full_path) then
+    vim.notify("Virtual environment created but validation failed", vim.log.levels.ERROR)
+    return nil
+  end
+
+  vim.notify("Successfully created virtual environment: " .. name, vim.log.levels.INFO)
+
+  -- Return the environment object
+  return {
+    path = full_path,
+    name = name,
+    type = "venv"
+  }
+end
+
 -- Get the path to the Python executable
 function M.get_python_path(env)
   if not env then return nil end

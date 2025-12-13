@@ -22,6 +22,9 @@ function M.show_picker(callback)
   local conda_envs = environments.find_conda_envs()
   local all_envs = {}
   
+  -- Add an option to create new venv (at the top)
+  table.insert(all_envs, { path = "", name = "++ Create new venv ++", type = "create_new" })
+
   -- Combine venvs and conda envs
   for _, env in ipairs(venvs) do
     table.insert(all_envs, env)
@@ -29,7 +32,7 @@ function M.show_picker(callback)
   for _, env in ipairs(conda_envs) do
     table.insert(all_envs, env)
   end
-  
+
   -- Add an option to deactivate
   table.insert(all_envs, { path = "", name = "-- Deactivate --", type = "deactivate" })
   

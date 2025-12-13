@@ -50,11 +50,34 @@ function M.detect_active_env()
   end
 end
 
+-- Prompt user to create a new venv
+function M.create_new_venv()
+  vim.ui.input({
+    prompt = "Enter virtual environment name: ",
+    default = "venv"
+  }, function(name)
+    if not name or name == "" then
+      vim.notify("Venv creation cancelled", vim.log.levels.INFO)
+      return
+    end
+
+    -- Create the venv in the current working directory
+    local new_env = environments.create_venv(name, vim.fn.getcwd())
+
+    if new_env then
+      -- Automatically activate the newly created venv
+      M.activate_env(new_env)
+    end
+  end)
+end
+
 -- Select environment using Telescope
 function M.select_env()
   telescope_integration.show_picker(function(env)
     if env.type == "deactivate" then
       M.deactivate_env()
+    elseif env.type == "create_new" then
+      M.create_new_venv()
     else
       M.activate_env(env)
     end
