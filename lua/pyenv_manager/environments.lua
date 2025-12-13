@@ -165,6 +165,19 @@ function M.create_venv(name, path)
 
   vim.notify("Successfully created virtual environment: " .. name, vim.log.levels.INFO)
 
+  -- Upgrade pip
+  vim.notify("Upgrading pip...", vim.log.levels.INFO)
+  local bin_dir = vim.fn.has("win32") == 1 and "Scripts" or "bin"
+  local pip_path = full_path .. "/" .. bin_dir .. "/pip"
+  local upgrade_cmd = pip_path .. " install --upgrade pip"
+  local upgrade_result = vim.fn.system(upgrade_cmd)
+
+  if vim.v.shell_error ~= 0 then
+    vim.notify("Warning: Failed to upgrade pip", vim.log.levels.WARN)
+  else
+    vim.notify("pip upgraded successfully", vim.log.levels.INFO)
+  end
+
   -- Return the environment object
   return {
     path = full_path,
