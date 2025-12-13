@@ -7,6 +7,7 @@ local finders = require("telescope.finders")
 local conf = require("telescope.config").values
 local actions = require("telescope.actions")
 local action_state = require("telescope.actions.state")
+local previewers = require("telescope.previewers")
 
 local environments = require("pyenv_manager.environments")
 local config = require("pyenv_manager.config")
@@ -36,6 +37,38 @@ function M.show_picker(callback)
   -- Add an option to deactivate
   table.insert(all_envs, { path = "", name = "-- Deactivate --", type = "deactivate" })
   
+  -- Create a custom previewer for showing packages
+  local package_previewer = previewers.new_buffer_previewer({
+    title = "Installed Packages",
+    define_preview = function(self, entry, status)
+      local env = entry.value
+
+      -- Don't preview for special entries
+      if env.type == "create_new" or env.type == "deactivate" then
+        vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, {
+          "No preview available for this option"
+        })
+        return
+      end
+
+      -- Get packages
+      local packages = environments.get_packages(env)
+
+      if not packages or #packages == 0 then
+        vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, {
+          "No packages found"
+        })
+        return
+      end
+
+      -- Display packages in preview buffer
+      vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, packages)
+
+      -- Set filetype for syntax highlighting
+      vim.api.nvim_set_option_value("filetype", "text", { buf = self.state.bufnr })
+    end,
+  })
+
   -- Show Telescope picker
   pickers.new({}, {
     prompt_title = "Select Python Environment",
@@ -60,12 +93,13 @@ function M.show_picker(callback)
       end,
     }),
     sorter = conf.generic_sorter({}),
+    previewer = package_previewer,
     attach_mappings = function(prompt_bufnr, map)
       actions.select_default:replace(function()
         actions.close(prompt_bufnr)
         local selection = action_state.get_selected_entry()
         local env = selection.value
-        
+
         if callback then
           callback(env)
         end

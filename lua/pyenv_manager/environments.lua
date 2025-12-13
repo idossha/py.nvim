@@ -158,11 +158,43 @@ end
 -- Get the path to the Python executable
 function M.get_python_path(env)
   if not env then return nil end
-  
+
   local bin_dir = vim.fn.has("win32") == 1 and "Scripts" or "bin"
   local python_exe = vim.fn.has("win32") == 1 and "python.exe" or "python"
-  
+
   return env.path .. "/" .. bin_dir .. "/" .. python_exe
+end
+
+-- Get list of installed packages in a venv
+function M.get_packages(env)
+  if not env or not env.path or env.path == "" then
+    return nil
+  end
+
+  -- Get pip path
+  local bin_dir = vim.fn.has("win32") == 1 and "Scripts" or "bin"
+  local pip_path = env.path .. "/" .. bin_dir .. "/pip"
+
+  -- Check if pip exists
+  if vim.fn.filereadable(pip_path) == 0 then
+    return {"pip not found in this environment"}
+  end
+
+  -- Run pip list
+  local cmd = pip_path .. " list --format=columns 2>&1"
+  local result = vim.fn.system(cmd)
+
+  if vim.v.shell_error ~= 0 then
+    return {"Error retrieving packages: " .. result}
+  end
+
+  -- Split result into lines
+  local lines = {}
+  for line in result:gmatch("[^\r\n]+") do
+    table.insert(lines, line)
+  end
+
+  return lines
 end
 
 -- Detect currently active environment
