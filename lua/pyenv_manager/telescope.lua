@@ -42,10 +42,20 @@ function M.show_picker(callback)
     finder = finders.new_table({
       results = all_envs,
       entry_maker = function(entry)
+        -- Format display with name and path
+        local display_text
+        if entry.type == "create_new" or entry.type == "deactivate" then
+          -- Special entries don't have paths
+          display_text = entry.name
+        else
+          -- Show name and absolute path
+          display_text = entry.name .. "  →  " .. entry.path
+        end
+
         return {
           value = entry,
-          display = entry.name,
-          ordinal = entry.name,
+          display = display_text,
+          ordinal = entry.name .. " " .. (entry.path or ""),
         }
       end,
     }),

@@ -48,10 +48,12 @@ function M.find_venvs()
     for _, venv_name in ipairs(config.options.venv_names) do
       local venv_path = parent_dir .. "/" .. venv_name
       if vim.fn.isdirectory(venv_path) == 1 and M.is_venv(venv_path) then
-        table.insert(venvs, { 
-          path = venv_path, 
-          name = "parent" .. i .. " (" .. venv_name .. ")", 
-          type = "venv" 
+        -- Use parent directory name + venv name for clarity
+        local parent_name = vim.fn.fnamemodify(parent_dir, ":t")
+        table.insert(venvs, {
+          path = venv_path,
+          name = parent_name .. "/" .. venv_name,
+          type = "venv"
         })
       end
     end
