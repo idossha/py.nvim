@@ -147,17 +147,25 @@ function M.show_info()
     vim.notify("No Python environment is active", vim.log.levels.INFO)
     return
   end
-  
+
   local info = "Active Python Environment:\n"
   info = info .. "  Name: " .. M.current_env.name .. "\n"
   info = info .. "  Type: " .. M.current_env_type .. "\n"
-  info = info .. "  Path: " .. M.current_env.path .. "\n"
-  
+
+  -- Resolve current path dynamically
+  local current_path = environments.resolve_path(M.current_env)
+  if current_path then
+    info = info .. "  Path: " .. current_path .. "\n"
+  else
+    info = info .. "  Path: [NOT FOUND - may have been moved]\n"
+    info = info .. "  Identifier: " .. (M.current_env.identifier or "unknown") .. "\n"
+  end
+
   local python_path = environments.get_python_path(M.current_env)
   if python_path then
     info = info .. "  Python: " .. python_path .. "\n"
   end
-  
+
   vim.notify(info, vim.log.levels.INFO)
 end
 
@@ -166,7 +174,8 @@ function M.set_env_info(env)
   if env then
     vim.g.pyenv_manager_env_name = env.name
     vim.g.pyenv_manager_env_type = env.type
-    vim.g.pyenv_manager_env_path = env.path
+    -- Use cached_path for display, or resolve dynamically if needed
+    vim.g.pyenv_manager_env_path = env.cached_path or environments.resolve_path(env)
   else
     vim.g.pyenv_manager_env_name = nil
     vim.g.pyenv_manager_env_type = nil

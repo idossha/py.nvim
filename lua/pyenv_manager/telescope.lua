@@ -89,14 +89,15 @@ function M.show_picker(callback)
           -- Special entries don't have paths
           display_text = entry.name
         else
-          -- Show name and absolute path
-          display_text = entry.name .. "  →  " .. entry.path
+          -- Show name and cached path (or identifier if path not available)
+          local path_display = entry.cached_path or entry.identifier or ""
+          display_text = entry.name .. "  →  " .. path_display
         end
 
         return {
           value = entry,
           display = display_text,
-          ordinal = entry.name .. " " .. (entry.path or ""),
+          ordinal = entry.name .. " " .. (entry.cached_path or entry.identifier or ""),
         }
       end,
     }),
