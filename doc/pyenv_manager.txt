@@ -1,0 +1,321 @@
+*pyenv_manager.txt*  Python environment manager for Neovim
+
+Author: Ido Haber
+License: MIT
+
+==============================================================================
+CONTENTS                                            *pyenv_manager-contents*
+
+    1. Introduction ...................... |pyenv_manager-introduction|
+    2. Installation ...................... |pyenv_manager-installation|
+    3. Configuration ..................... |pyenv_manager-configuration|
+    4. Commands .......................... |pyenv_manager-commands|
+    5. Functions ......................... |pyenv_manager-functions|
+    6. Lualine Integration ............... |pyenv_manager-lualine|
+    7. Troubleshooting ................... |pyenv_manager-troubleshooting|
+
+==============================================================================
+1. INTRODUCTION                                 *pyenv_manager-introduction*
+
+py.nvim is a Neovim plugin for managing Python virtual environments and conda
+environments. It provides seamless integration with Telescope for environment
+selection, lualine for status display, and automatic LSP configuration.
+
+Features:
+  - Automatic environment discovery (venv and conda)
+  - Environment switching via Telescope picker
+  - Lualine status bar integration
+  - Automatic LSP configuration
+  - Project-aware environment detection
+  - Python script execution with active environment
+
+==============================================================================
+2. INSTALLATION                                 *pyenv_manager-installation*
+
+Using lazy.nvim: >lua
+    {
+      "idossha/py.nvim",
+      dependencies = {
+        "nvim-telescope/telescope.nvim",
+        "nvim-lualine/lualine.nvim",
+      },
+      config = true,
+    }
+<
+
+Using packer.nvim: >lua
+    use {
+      'idossha/py.nvim',
+      requires = {
+        'nvim-telescope/telescope.nvim',
+        'nvim-lualine/lualine.nvim',
+      },
+      config = function()
+        require('pyenv_manager').setup()
+      end
+    }
+<
+
+==============================================================================
+3. CONFIGURATION                               *pyenv_manager-configuration*
+
+Setup function: >lua
+    require('pyenv_manager').setup(opts)
+<
+
+Default configuration: >lua
+    {
+      -- Search paths for virtual environments
+      venv_paths = {
+        vim.fn.expand("~/.virtualenvs"),
+        vim.fn.getcwd(),
+        vim.fn.expand("~/Projects"),
+      },
+
+      -- Paths for conda environments
+      conda_paths = {
+        vim.fn.expand("~/miniconda3/envs"),
+        vim.fn.expand("~/anaconda3/envs"),
+        vim.fn.expand("~/miniforge3/envs"),
+      },
+
+      -- Names to look for within directories for venvs
+      venv_names = {
+        "venv",
+        ".venv",
+        "env",
+        ".env",
+        "virtualenv",
+      },
+
+      -- Number of parent directories to check
+      parents = 2,
+
+      -- Whether to show conda environments
+      show_conda = true,
+
+      -- Whether to activate selected environment immediately
+      auto_activate = true,
+
+      -- Hooks when environment changes
+      changed_env_hooks = {},
+
+      -- Whether to create default mappings
+      create_mappings = true,
+
+      -- Default keymap for environment selection
+      keymap_select = ",v",
+
+      -- Default keymap for running Python scripts
+      keymap_run_script = ",,",
+
+      -- Auto-detect environment on startup
+      auto_detect_on_start = true,
+
+      -- Run script in terminal buffer
+      run_in_terminal = true,
+
+      -- Terminal window height
+      terminal_height = 15,
+
+      -- Lualine configuration
+      lualine = {
+        enabled = true,
+        icon = "󰆧 ",
+        color = { fg = "#a9dc76" },
+        section = "lualine_x",
+      },
+    }
+<
+
+Configuration options:~
+
+venv_paths                                   *pyenv_manager-config-venv_paths*
+    Type: `table`
+    Default: `{"~/.virtualenvs", getcwd(), "~/Projects"}`
+
+    List of directories to search for virtual environments.
+
+conda_paths                                 *pyenv_manager-config-conda_paths*
+    Type: `table`
+    Default: `{"~/miniconda3/envs", "~/anaconda3/envs", "~/miniforge3/envs"}`
+
+    List of directories to search for conda environments.
+
+venv_names                                   *pyenv_manager-config-venv_names*
+    Type: `table`
+    Default: `{"venv", ".venv", "env", ".env", "virtualenv"}`
+
+    Environment directory names to look for within search paths.
+
+parents                                         *pyenv_manager-config-parents*
+    Type: `number`
+    Default: `2`
+
+    Number of parent directories to check for project-specific environments.
+
+show_conda                                   *pyenv_manager-config-show_conda*
+    Type: `boolean`
+    Default: `true`
+
+    Whether to include conda environments in the picker.
+
+auto_activate                             *pyenv_manager-config-auto_activate*
+    Type: `boolean`
+    Default: `true`
+
+    Whether to activate the selected environment immediately.
+
+create_mappings                         *pyenv_manager-config-create_mappings*
+    Type: `boolean`
+    Default: `true`
+
+    Whether to create default keymaps.
+
+keymap_select                             *pyenv_manager-config-keymap_select*
+    Type: `string`
+    Default: `",v"`
+
+    Keymap for opening the environment selector.
+
+keymap_run_script                     *pyenv_manager-config-keymap_run_script*
+    Type: `string`
+    Default: `",,"`
+
+    Keymap for running Python scripts.
+
+auto_detect_on_start               *pyenv_manager-config-auto_detect_on_start*
+    Type: `boolean`
+    Default: `true`
+
+    Auto-detect active environment when Neovim starts.
+
+run_in_terminal                         *pyenv_manager-config-run_in_terminal*
+    Type: `boolean`
+    Default: `true`
+
+    Run Python scripts in a terminal buffer.
+
+terminal_height                         *pyenv_manager-config-terminal_height*
+    Type: `number`
+    Default: `15`
+
+    Height of terminal window for script execution.
+
+changed_env_hooks                     *pyenv_manager-config-changed_env_hooks*
+    Type: `table`
+    Default: `{}`
+
+    List of callback functions to run when environment changes.
+    Each function receives the environment table as an argument.
+
+==============================================================================
+4. COMMANDS                                         *pyenv_manager-commands*
+
+:PyenvSelect                                               *:PyenvSelect*
+    Open the Telescope picker to select a Python environment.
+    The picker shows available venv and conda environments.
+
+:PyenvDeactivate                                       *:PyenvDeactivate*
+    Deactivate the currently active Python environment.
+    Restores the previous PATH and clears environment variables.
+
+:PyenvInfo                                                   *:PyenvInfo*
+    Display information about the currently active environment.
+    Shows name, type, path, and Python executable location.
+
+:PyenvRunScript                                         *:PyenvRunScript*
+    Run the current Python file using the active environment.
+    Opens output in a terminal buffer if configured.
+
+==============================================================================
+5. FUNCTIONS                                           *pyenv_manager-functions*
+
+pyenv_manager.setup({opts})                          *pyenv_manager.setup()*
+    Initialize the plugin with optional configuration.
+
+    Parameters:~
+        {opts}  (table|nil) Configuration options
+
+    Returns:~
+        Module table for chaining
+
+pyenv_manager.select_env()                      *pyenv_manager.select_env()*
+    Open the environment selector (same as :PyenvSelect).
+
+pyenv_manager.activate_env({env})              *pyenv_manager.activate_env()*
+    Activate a specific environment.
+
+    Parameters:~
+        {env}  (table) Environment object with name, type, and path
+
+    Returns:~
+        (boolean) Success status
+
+pyenv_manager.deactivate_env()              *pyenv_manager.deactivate_env()*
+    Deactivate the current environment (same as :PyenvDeactivate).
+
+    Returns:~
+        (boolean) Success status
+
+pyenv_manager.show_info()                        *pyenv_manager.show_info()*
+    Show information about active environment (same as :PyenvInfo).
+
+pyenv_manager.run_script()                      *pyenv_manager.run_script()*
+    Run current Python script (same as :PyenvRunScript).
+
+pyenv_manager.get_current_env()          *pyenv_manager.get_current_env()*
+    Get the currently active environment object.
+
+    Returns:~
+        (table|nil) Current environment or nil if none active
+
+pyenv_manager.detect_active_env()      *pyenv_manager.detect_active_env()*
+    Auto-detect and activate environment based on current context.
+
+==============================================================================
+6. LUALINE INTEGRATION                                *pyenv_manager-lualine*
+
+To display the active Python environment in lualine: >lua
+    local python_env = require("pyenv_manager.lualine").get_component()
+
+    require("lualine").setup({
+      sections = {
+        lualine_x = {
+          python_env,
+          "encoding",
+          "fileformat",
+          "filetype",
+        },
+      },
+    })
+<
+
+The component displays the environment name and type with a configurable
+icon and color.
+
+==============================================================================
+7. TROUBLESHOOTING                            *pyenv_manager-troubleshooting*
+
+Environment not appearing in list~
+    - Check your venv_paths and conda_paths configuration
+    - Ensure environment has proper structure (bin/python or Scripts/python.exe)
+    - Verify directory permissions
+
+LSP not using selected environment~
+    - Restart LSP server: `:LspRestart`
+    - Check Python path: `:lua print(vim.g.python3_host_prog)`
+    - Verify environment activation: `:PyenvInfo`
+
+Environment not showing in lualine~
+    - Add lualine component to configuration
+    - Check if environment is active: `:PyenvInfo`
+    - Force refresh: `:redrawstatus`
+
+Script runner not working~
+    - Ensure environment is active: `:PyenvInfo`
+    - Verify file has .py extension
+    - Check terminal configuration settings
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
