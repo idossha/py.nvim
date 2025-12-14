@@ -3,16 +3,34 @@ local M = {}
 
 local config = require("pyenv_manager.config")
 
--- Helper function to create a unique identifier for a venv
-local function create_venv_identifier(venv_path, venv_name, discovery_type)
-  local project_name = vim.fn.fnamemodify(vim.fn.fnamemodify(venv_path, ":h"), ":t")
+-- Helper: Get bin directory name based on OS
+local function get_bin_dir()
+  return vim.fn.has("win32") == 1 and "Scripts" or "bin"
+end
+
+-- Helper: Get python executable name based on OS
+local function get_python_exe()
+  return vim.fn.has("win32") == 1 and "python.exe" or "python"
+end
+
+-- Helper: Get python path from environment path
+local function get_python_from_env_path(env_path)
+  return env_path .. "/" .. get_bin_dir() .. "/" .. get_python_exe()
+end
+
+-- Helper: Create environment identifier structure
+local function create_env_identifier(env_path, env_name, env_type, discovery_type)
+  local project_name = vim.fn.fnamemodify(vim.fn.fnamemodify(env_path, ":h"), ":t")
+  local identifier_prefix = env_type == "conda" and "conda/" or (project_name .. "/")
+
   return {
-    venv_name = venv_name,
-    project_name = project_name,
-    discovery_type = discovery_type,  -- "configured_path", "parent_dir", etc.
-    identifier = project_name .. "/" .. venv_name,
-    -- Store path only for initial display, but it will be resolved dynamically when used
-    cached_path = venv_path
+    venv_name = env_name,
+    project_name = env_type == "conda" and env_name or project_name,
+    discovery_type = discovery_type,
+    identifier = identifier_prefix .. env_name,
+    cached_path = env_path,
+    name = env_type == "conda" and ("conda: " .. env_name) or env_name,
+    type = env_type
   }
 end
 
@@ -20,161 +38,95 @@ end
 function M.resolve_path(env)
   if not env then return nil end
 
-  -- Handle conda environments differently
-  if env.type == "conda" then
-    -- First check if cached path still exists and is valid
-    if env.cached_path and
-       vim.fn.isdirectory(env.cached_path) == 1 and
-       M.is_conda_env(env.cached_path) then
-      return env.cached_path
-    end
-
-    -- Search in conda paths
-    for _, path in ipairs(config.options.conda_paths) do
-      if vim.fn.isdirectory(path) == 1 then
-        local entries = vim.fn.glob(path .. "/*", false, true)
-        for _, entry in ipairs(entries) do
-          if vim.fn.isdirectory(entry) == 1 then
-            local entry_name = vim.fn.fnamemodify(entry, ":t")
-            if entry_name == env.venv_name and M.is_conda_env(entry) then
-              env.cached_path = entry
-              return entry
-            end
-          end
-        end
-      end
-    end
-
-    return nil
-  end
-
-  -- Handle venv environments
-  -- First check if cached path still exists and is valid
-  if env.cached_path and
-     vim.fn.isdirectory(env.cached_path) == 1 and
-     M.is_venv(env.cached_path) then
+  -- Check if cached path is still valid
+  local is_valid = env.type == "conda" and M.is_conda_env or M.is_venv
+  if env.cached_path and vim.fn.isdirectory(env.cached_path) == 1 and is_valid(env.cached_path) then
     return env.cached_path
   end
 
-  -- Cached path is invalid, search for the venv again
+  -- Search function that checks a path and updates cache if found
+  local function check_and_cache(path)
+    if vim.fn.isdirectory(path) == 1 and is_valid(path) then
+      env.cached_path = path
+      return path
+    end
+  end
+
   local venv_name = env.venv_name
   local project_name = env.project_name
+  local search_paths = env.type == "conda" and config.options.conda_paths or config.options.venv_paths
 
   -- Search in configured paths
-  for _, path in ipairs(config.options.venv_paths) do
-    if vim.fn.isdirectory(path) == 1 then
-      -- Check if path itself matches
-      if vim.fn.fnamemodify(path, ":t") == venv_name and M.is_venv(path) then
-        env.cached_path = path
-        return path
-      end
+  for _, base_path in ipairs(search_paths) do
+    if vim.fn.isdirectory(base_path) == 1 then
+      -- Check if base path itself is the environment
+      local result = check_and_cache(base_path)
+      if result then return result end
 
-      -- Search in subdirectories
-      local entries = vim.fn.glob(path .. "/*", false, true)
-      for _, entry in ipairs(entries) do
+      -- Search subdirectories
+      for _, entry in ipairs(vim.fn.glob(base_path .. "/*", false, true)) do
         if vim.fn.isdirectory(entry) == 1 then
           local entry_name = vim.fn.fnamemodify(entry, ":t")
 
-          -- Direct match
-          if entry_name == venv_name and M.is_venv(entry) then
-            env.cached_path = entry
-            return entry
-          end
+          -- Direct match or project/venv match
+          result = check_and_cache(entry)
+          if result and entry_name == venv_name then return result end
 
-          -- Check for project/venv combination
-          if entry_name == project_name then
-            local venv_path = entry .. "/" .. venv_name
-            if vim.fn.isdirectory(venv_path) == 1 and M.is_venv(venv_path) then
-              env.cached_path = venv_path
-              return venv_path
-            end
-          end
-
-          -- Also try any venv inside this directory with matching name
-          local potential_path = entry .. "/" .. venv_name
-          if vim.fn.isdirectory(potential_path) == 1 and M.is_venv(potential_path) then
-            -- Check if the parent matches our project name
-            if vim.fn.fnamemodify(entry, ":t") == project_name then
-              env.cached_path = potential_path
-              return potential_path
-            end
-          end
+          result = check_and_cache(entry .. "/" .. venv_name)
+          if result and (entry_name == project_name or env.type == "conda") then return result end
         end
       end
     end
   end
 
-  -- Search in parent directories
-  local current_dir = vim.fn.getcwd()
-  local parent_dir = current_dir
-  for i = 1, config.options.parents do
-    local parent_name = vim.fn.fnamemodify(parent_dir, ":t")
-    local venv_path = parent_dir .. "/" .. venv_name
+  -- For venvs, also search parent directories
+  if env.type == "venv" then
+    local parent_dir = vim.fn.getcwd()
+    for i = 1, config.options.parents do
+      local result = check_and_cache(parent_dir .. "/" .. venv_name)
+      if result then return result end
 
-    if vim.fn.isdirectory(venv_path) == 1 and M.is_venv(venv_path) then
-      -- Check if this matches our identifier
-      if parent_name == project_name or project_name == venv_name then
-        env.cached_path = venv_path
-        return venv_path
-      end
-    end
-
-    parent_dir = vim.fn.fnamemodify(parent_dir, ":h")
-    if parent_dir == "/" or parent_dir:match("^%a:[\\/]$") then
-      break
+      parent_dir = vim.fn.fnamemodify(parent_dir, ":h")
+      if parent_dir == "/" or parent_dir:match("^%a:[\\/]$") then break end
     end
   end
 
-  -- Could not find the venv
   return nil
 end
 
 -- Find all virtual environments
 function M.find_venvs()
   local venvs = {}
-  local seen_identifiers = {}  -- Track identifiers we've already added to avoid duplicates
+  local seen = {}
 
-  -- Helper function to add venv if not duplicate
-  local function add_venv(venv_entry)
-    if not seen_identifiers[venv_entry.identifier] then
-      seen_identifiers[venv_entry.identifier] = true
-      table.insert(venvs, venv_entry)
+  local function add_if_new(env)
+    if not seen[env.identifier] then
+      seen[env.identifier] = true
+      table.insert(venvs, env)
     end
   end
 
   -- Search in predefined paths
   for _, path in ipairs(config.options.venv_paths) do
     if vim.fn.isdirectory(path) == 1 then
-      -- Check if the path itself is a venv
+      -- Check if path itself is a venv
       if M.is_venv(path) then
-        local venv_name = vim.fn.fnamemodify(path, ":t")
-        local env = create_venv_identifier(path, venv_name, "configured_path")
-        env.name = venv_name
-        env.type = "venv"
-        add_venv(env)
+        add_if_new(create_env_identifier(path, vim.fn.fnamemodify(path, ":t"), "venv", "configured"))
       end
 
-      -- Check for venvs in subdirectories
-      local entries = vim.fn.glob(path .. "/*", false, true)
-      for _, entry in ipairs(entries) do
+      -- Check subdirectories
+      for _, entry in ipairs(vim.fn.glob(path .. "/*", false, true)) do
         if vim.fn.isdirectory(entry) == 1 then
-          -- Check if entry is a venv
           if M.is_venv(entry) then
-            local venv_name = vim.fn.fnamemodify(entry, ":t")
-            local env = create_venv_identifier(entry, venv_name, "configured_path")
-            env.name = venv_name
-            env.type = "venv"
-            add_venv(env)
+            add_if_new(create_env_identifier(entry, vim.fn.fnamemodify(entry, ":t"), "venv", "configured"))
           else
-            -- Check for venv names in subdirectories
+            -- Check for standard venv names within projects
             for _, venv_name in ipairs(config.options.venv_names) do
               local venv_path = entry .. "/" .. venv_name
-              if vim.fn.isdirectory(venv_path) == 1 and M.is_venv(venv_path) then
-                local proj_name = vim.fn.fnamemodify(entry, ":t")
-                local env = create_venv_identifier(venv_path, venv_name, "configured_path")
-                env.name = proj_name .. " (" .. venv_name .. ")"
-                env.type = "venv"
-                add_venv(env)
+              if M.is_venv(venv_path) then
+                local env = create_env_identifier(venv_path, venv_name, "venv", "configured")
+                env.name = vim.fn.fnamemodify(entry, ":t") .. " (" .. venv_name .. ")"
+                add_if_new(env)
               end
             end
           end
@@ -183,25 +135,19 @@ function M.find_venvs()
     end
   end
 
-  -- Check parent directories for venvs
-  local current_dir = vim.fn.getcwd()
-  local parent_dir = current_dir
+  -- Check parent directories
+  local parent_dir = vim.fn.getcwd()
   for i = 1, config.options.parents do
     for _, venv_name in ipairs(config.options.venv_names) do
       local venv_path = parent_dir .. "/" .. venv_name
-      if vim.fn.isdirectory(venv_path) == 1 and M.is_venv(venv_path) then
-        -- Use parent directory name + venv name for clarity
-        local parent_name = vim.fn.fnamemodify(parent_dir, ":t")
-        local env = create_venv_identifier(venv_path, venv_name, "parent_dir")
-        env.name = parent_name .. "/" .. venv_name
-        env.type = "venv"
-        add_venv(env)
+      if M.is_venv(venv_path) then
+        local env = create_env_identifier(venv_path, venv_name, "venv", "parent")
+        env.name = vim.fn.fnamemodify(parent_dir, ":t") .. "/" .. venv_name
+        add_if_new(env)
       end
     end
     parent_dir = vim.fn.fnamemodify(parent_dir, ":h")
-    if parent_dir == "/" or parent_dir:match("^%a:[\\/]$") then
-      break
-    end
+    if parent_dir == "/" or parent_dir:match("^%a:[\\/]$") then break end
   end
 
   return venvs
@@ -215,43 +161,26 @@ end
 
 -- Find conda environments
 function M.find_conda_envs()
-  if not config.options.show_conda then
-    return {}
-  end
+  if not config.options.show_conda then return {} end
 
-  local conda_envs = {}
-  local seen_identifiers = {}  -- Track identifiers we've already added to avoid duplicates
-
-  -- Helper function to add conda env if not duplicate
-  local function add_conda_env(conda_entry)
-    if not seen_identifiers[conda_entry.identifier] then
-      seen_identifiers[conda_entry.identifier] = true
-      table.insert(conda_envs, conda_entry)
-    end
-  end
+  local envs = {}
+  local seen = {}
 
   for _, path in ipairs(config.options.conda_paths) do
     if vim.fn.isdirectory(path) == 1 then
-      local entries = vim.fn.glob(path .. "/*", false, true)
-      for _, entry in ipairs(entries) do
-        if vim.fn.isdirectory(entry) == 1 and M.is_conda_env(entry) then
-          local env_name = vim.fn.fnamemodify(entry, ":t")
-          local env = {
-            venv_name = env_name,
-            project_name = env_name,  -- For conda, project name is the env name
-            discovery_type = "conda_path",
-            identifier = "conda/" .. env_name,
-            cached_path = entry,
-            name = "conda: " .. env_name,
-            type = "conda"
-          }
-          add_conda_env(env)
+      for _, entry in ipairs(vim.fn.glob(path .. "/*", false, true)) do
+        if M.is_conda_env(entry) then
+          local env = create_env_identifier(entry, vim.fn.fnamemodify(entry, ":t"), "conda", "conda_path")
+          if not seen[env.identifier] then
+            seen[env.identifier] = true
+            table.insert(envs, env)
+          end
         end
       end
     end
   end
 
-  return conda_envs
+  return envs
 end
 
 -- Check if a directory is a valid conda env
@@ -303,13 +232,10 @@ function M.create_venv(name, path)
 
   vim.notify("Successfully created virtual environment: " .. name, vim.log.levels.INFO)
 
-  -- Upgrade pip using 'python -m pip' for consistency
+  -- Upgrade pip
   vim.notify("Upgrading pip...", vim.log.levels.INFO)
-  local bin_dir = vim.fn.has("win32") == 1 and "Scripts" or "bin"
-  local python_exe = vim.fn.has("win32") == 1 and "python.exe" or "python"
-  local python_path = full_path .. "/" .. bin_dir .. "/" .. python_exe
-  local upgrade_cmd = python_path .. " -m pip install --upgrade pip"
-  local upgrade_result = vim.fn.system(upgrade_cmd)
+  local python_path = get_python_from_env_path(full_path)
+  vim.fn.system(python_path .. " -m pip install --upgrade pip")
 
   if vim.v.shell_error ~= 0 then
     vim.notify("Warning: Failed to upgrade pip", vim.log.levels.WARN)
@@ -317,138 +243,50 @@ function M.create_venv(name, path)
     vim.notify("pip upgraded successfully", vim.log.levels.INFO)
   end
 
-  -- Return the environment object with identifier-based structure
-  local project_name = vim.fn.fnamemodify(vim.fn.fnamemodify(full_path, ":h"), ":t")
-  return {
-    venv_name = name,
-    project_name = project_name,
-    discovery_type = "created",
-    identifier = project_name .. "/" .. name,
-    cached_path = full_path,
-    name = name,
-    type = "venv"
-  }
+  return create_env_identifier(full_path, name, "venv", "created")
 end
 
 -- Get the path to the Python executable
 function M.get_python_path(env)
-  if not env then return nil end
-
-  -- Dynamically resolve the current path
   local env_path = M.resolve_path(env)
-  if not env_path then return nil end
-
-  local bin_dir = vim.fn.has("win32") == 1 and "Scripts" or "bin"
-  local python_exe = vim.fn.has("win32") == 1 and "python.exe" or "python"
-
-  return env_path .. "/" .. bin_dir .. "/" .. python_exe
+  return env_path and get_python_from_env_path(env_path) or nil
 end
 
 -- Get list of installed packages in a venv
 function M.get_packages(env)
-  if not env then
-    return {"No preview available"}
-  end
+  if not env then return {"No preview available"} end
 
-  -- Dynamically resolve the current path
   local env_path = M.resolve_path(env)
   if not env_path then
-    return {
-      "ERROR: Virtual environment not found",
-      "",
-      "Identifier: " .. (env.identifier or "unknown"),
-      "Expected venv: " .. (env.venv_name or "unknown"),
-      "In project: " .. (env.project_name or "unknown"),
-      "",
-      "This may happen if:",
-      "- A parent directory was renamed or moved",
-      "- The virtual environment was deleted",
-      "",
-      "Please refresh the environment list to rediscover available venvs."
-    }
+    return {"ERROR: Environment not found - " .. (env.identifier or "unknown")}
   end
 
-  -- Get python path instead of pip path
-  -- Use 'python -m pip' to avoid issues with broken shebangs after directory renames
-  local bin_dir = vim.fn.has("win32") == 1 and "Scripts" or "bin"
-  local python_exe = vim.fn.has("win32") == 1 and "python.exe" or "python"
-  local python_path = env_path .. "/" .. bin_dir .. "/" .. python_exe
-
-  -- Verify python exists
-  if vim.fn.filereadable(python_path) == 0 and vim.fn.executable(python_path) == 0 then
-    return {
-      "ERROR: Python executable not found",
-      "",
-      "Expected at: " .. python_path,
-      "",
-      "The virtual environment may be corrupted."
-    }
-  end
-
-  -- Run pip list using 'python -m pip' to avoid shebang issues
-  local cmd = python_path .. " -m pip list --format=columns 2>&1"
-  local result = vim.fn.system(cmd)
+  local python_path = get_python_from_env_path(env_path)
+  local result = vim.fn.system(python_path .. " -m pip list --format=columns 2>&1")
 
   if vim.v.shell_error ~= 0 then
-    return {
-      "ERROR: pip list command failed",
-      "",
-      "Command: " .. cmd,
-      "Path: " .. env_path,
-      "",
-      "Output:",
-      result
-    }
+    return {"ERROR: pip list failed", "", result}
   end
 
-  -- Split result into lines and clean each line
   local lines = {}
   for line in result:gmatch("[^\r\n]+") do
-    -- Remove any remaining newline characters and trim whitespace
-    local cleaned_line = line:gsub("[\r\n]", ""):gsub("^%s+", ""):gsub("%s+$", "")
-    if cleaned_line ~= "" then
-      table.insert(lines, cleaned_line)
-    end
+    local cleaned = line:gsub("^%s+", ""):gsub("%s+$", "")
+    if cleaned ~= "" then table.insert(lines, cleaned) end
   end
 
-  if #lines == 0 then
-    return {"No packages installed"}
-  end
-
-  return lines
+  return #lines > 0 and lines or {"No packages installed"}
 end
 
 -- Detect currently active environment
 function M.detect_active()
-  -- Check for venv
   local venv = vim.env.VIRTUAL_ENV
   if venv and venv ~= "" then
-    local venv_name = vim.fn.fnamemodify(venv, ":t")
-    local project_name = vim.fn.fnamemodify(vim.fn.fnamemodify(venv, ":h"), ":t")
-    return {
-      venv_name = venv_name,
-      project_name = project_name,
-      discovery_type = "active",
-      identifier = project_name .. "/" .. venv_name,
-      cached_path = venv,
-      name = venv_name,
-      type = "venv"
-    }
+    return create_env_identifier(venv, vim.fn.fnamemodify(venv, ":t"), "venv", "active")
   end
 
-  -- Check for conda
   local conda = vim.env.CONDA_PREFIX
   if conda and conda ~= "" then
-    local env_name = vim.fn.fnamemodify(conda, ":t")
-    return {
-      venv_name = env_name,
-      project_name = env_name,
-      discovery_type = "active",
-      identifier = "conda/" .. env_name,
-      cached_path = conda,
-      name = "conda: " .. env_name,
-      type = "conda"
-    }
+    return create_env_identifier(conda, vim.fn.fnamemodify(conda, ":t"), "conda", "active")
   end
 
   return nil
@@ -572,134 +410,59 @@ end
 
 -- Activate an environment
 function M.activate(env)
+  local resolved_path = M.resolve_path(env)
+  if not resolved_path then
+    vim.notify("Failed to locate environment: " .. env.name, vim.log.levels.ERROR)
+    return false
+  end
+
+  local python_path = M.get_python_path(env)
+  if not python_path then
+    vim.notify("Failed to locate Python in: " .. resolved_path, vim.log.levels.ERROR)
+    return false
+  end
+
+  local path_sep = vim.fn.has("win32") == 1 and ";" or ":"
+
+  -- Update PATH and Python host
+  vim.env.PATH = resolved_path .. "/" .. get_bin_dir() .. path_sep .. vim.env.PATH
+  vim.g.python3_host_prog = python_path
+
+  -- Set environment-specific variables
   if env.type == "venv" then
-    -- For virtual environments
-    -- Dynamically resolve the current path
-    local resolved_path = M.resolve_path(env)
-    if not resolved_path then
-      vim.notify("Failed to locate virtual environment: " .. env.name, vim.log.levels.ERROR)
-      return false
-    end
-
-    local bin_dir = vim.fn.has("win32") == 1 and "Scripts" or "bin"
-    local env_path = resolved_path .. "/" .. bin_dir
-
-    -- Update PATH
-    vim.env.PATH = env_path .. (vim.fn.has("win32") == 1 and ";" or ":") .. vim.env.PATH
     vim.env.VIRTUAL_ENV = resolved_path
+    vim.env.PYTHONPATH = vim.fn.fnamemodify(python_path, ":h:h") .. "/lib/site-packages"
+      .. (vim.env.PYTHONPATH and (path_sep .. vim.env.PYTHONPATH) or "")
+  elseif env.type == "conda" then
+    vim.env.CONDA_PREFIX = resolved_path
+    vim.env.CONDA_DEFAULT_ENV = vim.fn.fnamemodify(resolved_path, ":t")
 
-    -- Update Python path for LSP
-    local python_path = M.get_python_path(env)
-    if not python_path then
-      vim.notify("Failed to locate Python executable in: " .. resolved_path, vim.log.levels.ERROR)
-      return false
-    end
-    vim.g.python3_host_prog = python_path
-
-    -- Restart Python LSP servers
-    M.restart_python_lsp(python_path)
-
-    -- Apply sys.path changes by setting PYTHONPATH
-    -- This helps with import resolution
-    local site_packages_path = vim.fn.fnamemodify(python_path, ":h:h") .. "/lib/site-packages"
-    -- Get any existing PYTHONPATH
-    local existing_pythonpath = vim.env.PYTHONPATH or ""
-    -- Set the PYTHONPATH to include the site-packages directory
-    vim.env.PYTHONPATH = site_packages_path .. (existing_pythonpath ~= "" and (":" .. existing_pythonpath) or "")
-
-    return true
-  elseif env.type == "conda" and M.is_conda_available() then
-    -- For conda environments
-    -- Dynamically resolve the current path
-    local conda_prefix = M.resolve_path(env)
-    if not conda_prefix then
-      vim.notify("Failed to locate conda environment: " .. env.name, vim.log.levels.ERROR)
-      return false
-    end
-    local bin_dir = vim.fn.has("win32") == 1 and "Scripts" or "bin"
-    local env_path = conda_prefix .. "/" .. bin_dir
-    
-    -- Update PATH
-    vim.env.PATH = env_path .. (vim.fn.has("win32") == 1 and ";" or ":") .. vim.env.PATH
-    vim.env.CONDA_PREFIX = conda_prefix
-    vim.env.CONDA_DEFAULT_ENV = vim.fn.fnamemodify(conda_prefix, ":t") -- Environment name
-    
-    -- Update Python path for LSP
-    local python_path = M.get_python_path(env)
-    vim.g.python3_host_prog = python_path
-    
-    -- Check for conda activation scripts
-    local activate_d_path = conda_prefix .. "/etc/conda/activate.d"
-    if vim.fn.isdirectory(activate_d_path) == 1 then
-      local scripts = vim.fn.glob(activate_d_path .. "/*.sh", false, true)
-      for _, script_path in ipairs(scripts) do
-        -- Read script content to look for PYTHONPATH modifications
-        local file = io.open(script_path, "r")
+    -- Check conda activation scripts for PYTHONPATH
+    local activate_d = resolved_path .. "/etc/conda/activate.d"
+    if vim.fn.isdirectory(activate_d) == 1 then
+      for _, script in ipairs(vim.fn.glob(activate_d .. "/*.sh", false, true)) do
+        local file = io.open(script, "r")
         if file then
-          local content = file:read("*all")
+          local custom_path = file:read("*all"):match("export PYTHONPATH=([^:]+)")
           file:close()
-          
-          -- Look for SimNIBS specific path (or any PYTHONPATH export)
-          local simnibs_path = content:match("export PYTHONPATH=([^:]+)")
-          if simnibs_path then
-            -- Add this path to PYTHONPATH
-            local existing_pythonpath = vim.env.PYTHONPATH or ""
-            if existing_pythonpath ~= "" then
-              vim.env.PYTHONPATH = simnibs_path .. ":" .. existing_pythonpath
-            else
-              vim.env.PYTHONPATH = simnibs_path
-            end
-            vim.notify("Added custom path from activation script: " .. simnibs_path, vim.log.levels.INFO)
+          if custom_path then
+            vim.env.PYTHONPATH = custom_path .. (vim.env.PYTHONPATH and (path_sep .. vim.env.PYTHONPATH) or "")
           end
         end
       end
     end
-    
-    -- Special case for SimNIBS environment
+
+    -- Special case: SimNIBS
     if env.name:match("simnibs") then
-      local simnibs_path = "/Users/idohaber/Applications/SimNIBS-4.5"
-      if vim.fn.isdirectory(simnibs_path) == 1 then
-        local existing_pythonpath = vim.env.PYTHONPATH or ""
-        if existing_pythonpath ~= "" then
-          vim.env.PYTHONPATH = simnibs_path .. ":" .. existing_pythonpath
-        else
-          vim.env.PYTHONPATH = simnibs_path
-        end
-        vim.notify("Added SimNIBS path: " .. simnibs_path, vim.log.levels.INFO)
+      local simnibs = "/Users/idohaber/Applications/SimNIBS-4.5"
+      if vim.fn.isdirectory(simnibs) == 1 then
+        vim.env.PYTHONPATH = simnibs .. (vim.env.PYTHONPATH and (path_sep .. vim.env.PYTHONPATH) or "")
       end
     end
-    
-    -- Restart Python LSP servers
-    M.restart_python_lsp(python_path)
-    
-    -- Apply sys.path changes by setting PYTHONPATH for site-packages too
-    -- This helps with import resolution
-    local site_packages_path
-    if vim.fn.has("win32") == 1 then
-      site_packages_path = conda_prefix .. "/Lib/site-packages"
-    else
-      site_packages_path = conda_prefix .. "/lib/python3.*/site-packages"
-      -- Expand the wildcard to get the actual path
-      local cmd = "ls -d " .. site_packages_path .. " 2>/dev/null || echo ''"
-      local handle = io.popen(cmd)
-      if handle then
-        site_packages_path = handle:read("*a"):gsub("%s+$", "")
-        handle:close()
-      end
-    end
-    
-    -- Only set PYTHONPATH if we found a valid site-packages path
-    if site_packages_path ~= "" then
-      -- Get any existing PYTHONPATH
-      local existing_pythonpath = vim.env.PYTHONPATH or ""
-      -- Set the PYTHONPATH to include the site-packages directory
-      vim.env.PYTHONPATH = existing_pythonpath .. (existing_pythonpath ~= "" and (":" .. site_packages_path) or site_packages_path)
-    end
-    
-    return true
-  else
-    return false
   end
+
+  M.restart_python_lsp(python_path)
+  return true
 end
 -- Deactivate an environment
 function M.deactivate(env, previous_path)
