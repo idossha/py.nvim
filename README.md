@@ -2,7 +2,7 @@
 
 A Neovim plugin for managing Python virtual environments and conda environments with lualine integration and script execution.
 
-![PyEnv Manager](assets/pynvim_UI.png)
+<img src="assets/pynvim_UI.png" alt="PyEnv Manager" width="600">
 
 ## Features
 
